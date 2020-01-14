@@ -118,6 +118,7 @@ typedef struct light_switch_ctx_s
 static zb_bool_t SOLE_GROUP_full = false;
 static light_switch_bulb_params_t bulb_params;
 static all_bulb_params_t bulb[100];
+static zb_uint8_t bulb_count = 0;
 static zb_uint16_t DEFAULT_GROUP_ID;
 static zb_bool_t bulb_found_1 = false;
 static zb_bool_t bulb_found_2 = false;
