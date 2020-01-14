@@ -98,8 +98,9 @@ typedef struct light_switch_bulb_params_s
 
 typedef struct all_bulb_params_s
 {
-  zb_uint8_t  endpoint;
+  zb_bool_t   joined_group;
   zb_uint16_t short_addr;
+  zb_uint8_t  endpoint;
 } all_bulb_params_t;
 //added end
 
@@ -118,6 +119,10 @@ typedef struct light_switch_ctx_s
 static zb_bool_t SOLE_GROUP_full = false;
 static light_switch_bulb_params_t bulb_params;
 static all_bulb_params_t bulb[100];
+static zb_uint8_t bulb_count = 0;
+static zb_uint8_t bulb_select = 0;
+static zb_bool_t all_on = true;
+static zb_bool_t first_search = false;
 static zb_uint16_t DEFAULT_GROUP_ID;
 static zb_bool_t bulb_found_1 = false;
 static zb_bool_t bulb_found_2 = false;
@@ -249,24 +254,33 @@ static zb_void_t light_switch_send_remove_group(zb_uint8_t param, zb_uint16_t on
                                         DEFAULT_GROUP_ID);
 }
 
-static zb_void_t light_switch_send_view_group(zb_uint8_t param, zb_uint16_t on_off)
+static zb_void_t light_switch_send_all_on_off(zb_uint8_t param)
 {
+    zb_uint8_t           cmd_id;
+    zb_uint16_t          group_id = DEFAULT_GROUP_ID;
     zb_buf_t           * p_buf = ZB_BUF_FROM_REF(param);
-    zb_uint8_t command = 0x01;
-    NRF_LOG_INFO("Send GROUPS command: %d", command);
+    if (all_on == true)
+    {
+        cmd_id = ZB_ZCL_CMD_ON_OFF_OFF_ID;
+        all_on = false;
+    }
+    else
+    {
+        cmd_id = ZB_ZCL_CMD_ON_OFF_ON_ID;
+        all_on = true;
+    }
     
-    ZB_ZCL_GROUPS_SEND_VIEW_GROUP_REQ(p_buf,
-                                      bulb_params.short_addr,
-                                      ZB_APS_ADDR_MODE_16_ENDP_PRESENT,
-                                      bulb_params.endpoint,
-                                      LIGHT_SWITCH_ENDPOINT,
-                                      ZB_AF_HA_PROFILE_ID,
-                                      ZB_ZCL_ENABLE_DEFAULT_RESPONSE,
-                                      NULL,
-                                      DEFAULT_GROUP_ID);
-    zb_zcl_groups_add_group_res_t view_group_res;
-    ZB_ZCL_GROUPS_GET_VIEW_GROUP_REQ(p_buf,
-                                     view_group_res);
+    NRF_LOG_INFO("Send ON/OFF command: %d", cmd_id);
+
+    ZB_ZCL_ON_OFF_SEND_REQ(p_buf,
+                           group_id,
+                           ZB_APS_ADDR_MODE_16_GROUP_ENDP_NOT_PRESENT,
+                           0,
+                           LIGHT_SWITCH_ENDPOINT,
+                           ZB_AF_HA_PROFILE_ID,
+                           ZB_ZCL_DISABLE_DEFAULT_RESPONSE,
+                           cmd_id,
+                           NULL);
 }
 //added end
 
@@ -371,7 +385,16 @@ static zb_void_t light_switch_leave_and_join(zb_uint8_t param)
         }
     }
 }
-
+static zb_bool_t valueinarray(zb_uint16_t val)
+{
+    int i;
+    for(i = 0; i < bulb_count; i++)
+    {
+        if(bulb[i].short_addr == val)
+            return 1;
+    }
+    return 0;
+}
 
 /**@brief Function for sending add group request. As a result all light bulb's
  *        light controlling endpoints will participate in the same group.
@@ -385,7 +408,13 @@ static zb_void_t add_group(zb_uint8_t param)
     zb_apsde_data_indication_t * p_ind  = ZB_GET_BUF_PARAM(p_buf, zb_apsde_data_indication_t); // Get the pointer to the parameters buffer, which stores APS layer response
     zb_uint16_t                  dst_addr = p_ind->src_addr;
     zb_uint8_t                   dst_ep = *(zb_uint8_t *)(p_resp + 1);
-
+    //added start
+    zb_bool_t new_bulb = true;
+    
+    new_bulb = valueinarray(dst_addr);
+    if (new_bulb == true || first_search == false)
+    {
+    //added end
     NRF_LOG_INFO("Include device 0x%x, ep %d to the group 0x%x", dst_addr, dst_ep, DEFAULT_GROUP_ID);
 
     ZB_ZCL_GROUPS_SEND_ADD_GROUP_REQ(p_buf,
@@ -398,25 +427,30 @@ static zb_void_t add_group(zb_uint8_t param)
                                      NULL,
                                      DEFAULT_GROUP_ID);
     //added start
-    if (bulb_found_1 != true)
-    {
-        bulb_found_1 = true;
+    bulb[bulb_count].short_addr = dst_addr;
+    bulb[bulb_count].joined_group = true;
+    bulb[bulb_count].endpoint = dst_ep;
+    bulb_count += 1;
     }
-    else if (bulb_found_2 != true)
-    {
-        bulb_found_2 = true;
-    }
-    else if (bulb_found_3 != true)
-    {
-        bulb_found_3 = true;
-    }
+//    if (bulb_found_1 != true)
+//    {
+//        bulb_found_1 = true;
+//    }
+//    else if (bulb_found_2 != true)
+//    {
+//        bulb_found_2 = true;
+//    }
+//    else if (bulb_found_3 != true)
+//    {
+//        bulb_found_3 = true;
+//    }
 
-    if (SOLE_GROUP_full == false)
-    {
-        bulb_params.endpoint = dst_ep;
-        bulb_params.short_addr = dst_addr;
-        SOLE_GROUP_full = true;
-    }
+//    if (SOLE_GROUP_full == false)
+//    {
+//        bulb_params.endpoint = dst_ep;
+//        bulb_params.short_addr = dst_addr;
+//        SOLE_GROUP_full = true;
+//    }
     //added end
 }
 
@@ -503,6 +537,41 @@ static zb_void_t find_light_bulb(zb_uint8_t param)
     UNUSED_RETURN_VALUE(zb_zdo_match_desc_req(param, find_light_bulb_cb));
 }
 
+//added start
+static zb_void_t add_remove_group(zb_uint8_t param)
+{
+    zb_buf_t                   * p_buf = ZB_BUF_FROM_REF(param);
+
+    if (bulb[bulb_select].joined_group == false)
+    {
+        ZB_ZCL_GROUPS_SEND_ADD_GROUP_REQ(p_buf,
+                                     bulb[bulb_select].short_addr,
+                                     ZB_APS_ADDR_MODE_16_ENDP_PRESENT,
+                                     bulb[bulb_select].endpoint,
+                                     LIGHT_SWITCH_ENDPOINT,
+                                     ZB_AF_HA_PROFILE_ID,
+                                     ZB_ZCL_DISABLE_DEFAULT_RESPONSE,
+                                     NULL,
+                                     DEFAULT_GROUP_ID);
+        bulb[bulb_select].joined_group = true;
+    }
+    else
+    {
+        ZB_ZCL_GROUPS_SEND_REMOVE_GROUP_REQ(p_buf,
+                                        bulb[bulb_select].short_addr,
+                                        ZB_APS_ADDR_MODE_16_ENDP_PRESENT,
+                                        bulb[bulb_select].endpoint,
+                                        LIGHT_SWITCH_ENDPOINT,
+                                        ZB_AF_HA_PROFILE_ID,
+                                        ZB_ZCL_ENABLE_DEFAULT_RESPONSE,
+                                        NULL,
+                                        DEFAULT_GROUP_ID);
+        bulb[bulb_select].joined_group = false;
+    }
+
+}
+//added end
+
 /**@brief Callback for detecting button press duration.
  *
  * @param[in]   button   BSP Button that was pressed.
@@ -555,22 +624,65 @@ static zb_void_t light_switch_button_handler(zb_uint8_t button)
             //added start
             if (on_off == 2)
             {
-                zb_err_code = ZB_GET_OUT_BUF_DELAYED2(light_switch_send_on_off, on_off);
+                zb_err_code = ZB_GET_OUT_BUF_DELAYED(add_remove_group);
                 ZB_ERROR_CHECK(zb_err_code);
 
             }
             else if (on_off == 3)
             {
-                zb_err_code = ZB_GET_OUT_BUF_DELAYED2(light_switch_send_remove_group, on_off);
+                if (bulb_select >= bulb_count - 1)
+                {
+                    bulb_select = 0;
+                }
+                else
+                {
+                    bulb_select += 1;
+                }
+                switch(bulb_select)
+                {
+                    case 0:
+                        bsp_board_led_off(BULB_FOUND_1_LED);
+                        bsp_board_led_off(BULB_FOUND_2_LED);
+                        bsp_board_led_on(BULB_FOUND_3_LED);
+                        break;
+                    case 1:
+                        bsp_board_led_off(BULB_FOUND_1_LED);
+                        bsp_board_led_on(BULB_FOUND_2_LED);
+                        bsp_board_led_off(BULB_FOUND_3_LED);
+                        break;
+                    case 2:
+                        bsp_board_led_off(BULB_FOUND_1_LED);
+                        bsp_board_led_on(BULB_FOUND_2_LED);
+                        bsp_board_led_on(BULB_FOUND_3_LED);
+                        break;
+                    case 3:
+                        bsp_board_led_on(BULB_FOUND_1_LED);
+                        bsp_board_led_off(BULB_FOUND_2_LED);
+                        bsp_board_led_off(BULB_FOUND_3_LED);
+                        break;
+                    default:
+                        NRF_LOG_INFO("Unhandled bulb_select received: %d", bulb_select);
+                        return;
+                }
+//                zb_err_code = ZB_GET_OUT_BUF_DELAYED2(light_switch_send_remove_group, on_off);
+//                ZB_ERROR_CHECK(zb_err_code);
+            }
+            else if (on_off == 0)
+            {
+                first_search = true;
+                zb_err_code = ZB_GET_OUT_BUF_DELAYED(find_light_bulb);
                 ZB_ERROR_CHECK(zb_err_code);
             }
             else
             {
+                zb_err_code = ZB_GET_OUT_BUF_DELAYED(light_switch_send_all_on_off);
+                ZB_ERROR_CHECK(zb_err_code);
+            }
             //added end
             /* Allocate output buffer and send on/off command. */
-            zb_err_code = ZB_GET_OUT_BUF_DELAYED2(light_switch_send_on_off, on_off);
-            ZB_ERROR_CHECK(zb_err_code);
-            }
+//            zb_err_code = ZB_GET_OUT_BUF_DELAYED2(light_switch_send_on_off, on_off);
+//            ZB_ERROR_CHECK(zb_err_code);
+//            }
         }
 
         /* Button released - wait for accept next event. */
