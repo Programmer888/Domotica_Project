@@ -1,0 +1,2 @@
+Output/zigbee_light_switch_groups_pca10056\ Debug/Obj/ses_startup_nrf_common.o: \
+ C:\nRF5_SDK_for_Thread_and_Zigbee_v3.2.0_9fade31\modules\nrfx\mdk\ses_startup_nrf_common.s
